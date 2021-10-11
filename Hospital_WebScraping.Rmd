@@ -1,0 +1,775 @@
+---
+title: "Hospital Webscraping"
+author: "Emma Farber" 
+output: html_notebook
+---
+
+# Hospital Webscraping
+
+This notebook contains code to web scrape from a list of US hospital URLs to see which hospitals provide Fragility Liason Services. 
+
+
+```{r}
+#### set up ####
+library(rvest)
+library(tidyverse)
+``` 
+
+
+
+```{r}
+#### read in files ####
+
+hospital_urls <- read_csv("Hospital_URLS_1.csv")
+hospital_urls
+
+# read in search terms, and clean them up 
+search_terms <- read_csv("FLS_search_terms.csv")$SearchTerms %>% tolower() 
+search_terms <- gsub("[[:punct:]]", " ", search_terms) %>% unique()
+
+# define URL search terms 
+url_search_terms <- c("bone","osteo","metabolic","fracture","hip","liason")
+
+```
+
+
+```{r warning=FALSE}
+#### temp chunk: which sitemaps to manually examine ####
+
+# started with an excel file of hospitals and URLs
+# did some manual inspection to clean up hospital URLS (mostly trimming to the origin URL)
+# created sitemap_1 field 
+    # mostly just taking the origin URL and adding "/sitemap.xml" to it 
+    # tried a few sitemaps and manually overwrote some of them 
+# let's just see which pages exist at all 
+
+
+
+
+# list of sitemaps 
+sitemaps_1 <- hospital_urls$sitemap_1
+site_error_list <- c()
+# which sitemaps exist 
+# half at a time
+for(site in sitemaps_1[1:50]){
+  tryCatch(expr = {read_html(site)
+    message()
+    },
+    error = function(e){
+      message(paste0("ERROR: ", site)
+              #,
+              #site_error_list <- c(site_error_list, site)
+              )
+    },
+    warning = function(e){
+      message(paste0("Warning in: ", site))
+    }
+    )
+}
+
+
+
+```
+
+errors in 26 through 50 
+ERROR: http://www.ghs.org/sitemap.xml
+
+
+ERROR: http://www.halifax.org/sitemap.xml
+ERROR: http://www.hchdonline.com/sitemap.xml
+ERROR: http://www.methodisthealth.com/sitemap.xml
+
+
+
+
+ERROR: http://www.Jamaicahospital.org/sitemap.xml
+ERROR: http://www.kaleidahealth.org/sitemap.xml
+
+
+
+
+
+ERROR: http://www.lij.edu/sitemap.xml
+ERROR: http://www.navicenthealth.org/sitemap.xml
+ERROR: http://www.mhhs.org/sitemap.xml
+
+ERROR: http://www.mercy.net/sitemap.xml
+ERROR: http://www.mercy.net/sitemap.xml
+ERROR: http://www.methodisthealth.org/sitemap.xml
+
+
+
+```{r}
+#### set up functions for nested sitemaps #### 
+
+
+## choosing which to search 
+nested_xml <- function(){
+  z <- readline("Which sitemap should we search?")
+  # assign global true/false
+  TF <<- readline("Do you want to search another sitemap?")
+  z
+}
+
+nested_xml_wrapper <- function(){
+  url <- c(nested_xml())
+  if(TF){
+    url <- c(url,nested_xml())
+  }
+  url
+}
+
+
+
+### just search all 
+read_nested_urls <- function(xml_list){
+  nested_urls <<- c()
+  for(x in xml_list){
+    html <- read_html(x)
+    urls <- html %>% html_elements("loc") %>% html_text2 
+    nested_urls <<- c(nested_urls, urls)
+  }
+  nested_urls
+}
+
+# make things possible
+possibly_read <- possibly(read_html, NA)
+possibly_parse <- possibly(html_text2, NA)
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+#### version 2 #### 
+
+# keeps all URLS in nexted xml
+# but searches on keyterms 
+
+# function takes a website, attempts to take the website's sitemap URL, 
+# collects all sub-sitemaps, and scrapes text from all URLs 
+# Minor pre-processing is applied to the text 
+# Function then searches for the presences of keywords on the sitemap pages 
+# and returns a dataframe that includes the parent site, the url scraped, an indicator for a keyword match, and the site text 
+
+# search site function 
+search_site <- function(sitemap, url_search_terms,
+                        content_search_terms){
+  html <- read_html(sitemap)
+  urls <- html %>% html_elements("loc") %>% html_text2
+  
+  # are any of these URLs additional sitemaps? 
+  # if the search for "xml" returns nothing, 
+  if(identical(urls[grep("xml", urls, ignore.case = T)], character(0))){
+    search_urls <- urls
+  } else {
+    search_urls <- read_nested_urls(urls)
+  }
+  
+  # search for key terms in urls 
+  keep_urls <- c()
+  for(t in url_search_terms){
+    keep_urls <- c(keep_urls,search_urls[grep(t, search_urls, ignore.case = T)])
+  }
+  
+  
+  ### remove things like jpegs, pngs, etc 
+  keep_urls <- keep_urls[!grepl(".jpg", keep_urls)]
+  keep_urls <- keep_urls[!grepl(".jpeg", keep_urls)]
+  keep_urls <- keep_urls[!grepl(".png", keep_urls)]
+  keep_urls <- keep_urls[!grepl(".bmp", keep_urls)]
+  keep_urls <- keep_urls[!grepl(".gif", keep_urls)]
+  
+  
+  content_match <- matrix(nrow = length(keep_urls), ncol = 4)
+
+  
+  for(p in 1:length(keep_urls)){
+    page_scrape <- possibly_read(keep_urls[p])
+    page_scrape <- possibly_parse(page_scrape) %>% str_to_lower()
+    
+    # remove punctuation 
+    page_scrape <- gsub("[[:punct:]]", " ", page_scrape)
+    # remove extra spaces 
+    page_scrape <- gsub("  ", " ", page_scrape)
+    # assign match value
+    match_value <- ifelse(sum(str_detect(page_scrape, content_search_terms)),"Keyword Match", NA)
+    # col 1: site
+    content_match[p,1] <- sitemap
+    # col 2: url 
+    content_match[p,2] <- keep_urls[p]
+    # col 3: match value 
+    content_match[p,3] <- match_value
+    # col 4: page text 
+    content_match[p,4] <- page_scrape
+    
+  }
+  df <- content_match %>% as.data.frame()
+    names(df) <- c("sitemap","url","match","page text")
+    df 
+                        }
+
+```
+
+
+
+
+```{r}
+#### try it out #### 
+
+# get list of hospitals 
+hosp_url_list <- hospital_urls %>% filter(is.na(manual_fail), is.na(special_sitemap)) %>% .$final_sitemap
+# first batch 
+hosp_url_list[1:15]
+
+
+# read in search terms, and clean them up 
+search_terms <- read_csv("FLS_search_terms.csv")$SearchTerms %>% tolower() 
+search_terms <- gsub("[[:punct:]]", " ", search_terms) %>% unique()
+
+# define URL search terms 
+url_search_terms <- c("bone","osteo","metabolic","fracture","liason")
+
+
+# run function on one 
+hosp1 <- search_site(hosp_url_list[1],url_search_terms, search_terms)
+
+```
+
+
+```{r}
+# run another one 
+hosp2 <- search_site(hosp_url_list[4], url_search_terms, search_terms)
+hosp2
+```
+
+
+```{r}
+#### batch 1 ####
+
+results_batch1 <- data.frame()
+errored_sitemaps <- c()
+
+for(h in hosp_url_list[1:10]){
+  result <- try(search_site(h, url_search_terms, search_terms), silent = TRUE)
+  if(str_detect(result, "Error")){
+    errored_sitemaps <- c(errored_sitemaps, h)
+  } else {
+    results_batch1 <- rbind(results_batch1, result)
+  }
+  print(paste0("Done with ",h))
+}
+
+# view results 
+errored_sitemaps
+results_batch1$sitemap %>% unique()
+results_batch1 %>% filter(!is.na(match))
+```
+
+
+```{r}
+#### batch 2 ####
+
+results_batch2 <- data.frame()
+
+for(h in hosp_url_list[11:20]){
+  result <- try(search_site(h, url_search_terms, search_terms), silent = TRUE)
+  if(str_detect(result, "Error")){
+    errored_sitemaps <- c(errored_sitemaps, h)
+  } else {
+    results_batch2 <- rbind(results_batch2, result)
+  }
+  print(paste0("Done with ",h))
+}
+
+results_batch2 %>% filter(!is.na(match))
+
+```
+
+
+
+For final product: 
+
+- list of hospitals that match some keywords 
+- appended dataframe of all results batches 
+  - to get list of hospitals for the item above, filter to !is.na(match)
+  - then get unique list of sitemaps 
+  - then match back to the input dataframe to get hospital names 
+- list of errored sites (match back to hospital / url)
+
+total hours so far: 6 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+### diagnose error
+
+sitemap<- hosp_url_list[4]
+
+html <- read_html(sitemap)
+  urls <- html %>% html_elements("loc") %>% html_text2
+  
+  # are any of these URLs additional sitemaps? 
+  # if the search for "xml" returns nothing, 
+  if(identical(urls[grep("xml", urls, ignore.case = T)], character(0))){
+    search_urls <- urls
+  } else {
+    search_urls <- read_nested_urls(urls)
+  }
+  
+  # search for key terms in urls 
+  keep_urls <- c()
+  for(t in url_search_terms){
+    keep_urls <- c(keep_urls,search_urls[grep(t, search_urls, ignore.case = T)])
+  }
+  keep_urls
+  content_match <- matrix(nrow = length(keep_urls), ncol = 4)
+
+  
+  for(p in 1:length(keep_urls)){
+    print(p)
+    page_scrape <- read_html(keep_urls[p]) %>% 
+      html_text2() %>% 
+      str_to_lower()
+    # remove punctuation 
+    page_scrape <- gsub("[[:punct:]]", " ", page_scrape)
+    # remove extra spaces 
+    page_scrape <- gsub("  ", " ", page_scrape)
+    # assign match value
+    match_value <- ifelse(sum(str_detect(page_scrape, content_search_terms)),"Keyword Match", NA)
+    # col 1: site
+    content_match[p,1] <- sitemap
+    # col 2: url 
+    content_match[p,2] <- keep_urls[p]
+    # col 3: match value 
+    content_match[p,3] <- match_value
+    # col 4: page text 
+    content_match[p,4] <- page_scrape
+    
+  }
+  df <- content_match %>% as.data.frame()
+    names(df) <- c("sitemap","url","match","page text")
+    df 
+    
+    
+    
+page_scrape <- read_html(keep_urls[2])
+x <- possibly(read_html(keep_urls[2]),NA)
+x
+keep_urls[2] %>% possibly(read_html, NA)
+possibly_read <- possibly(read_html, NA)
+possibly_parse <- possibly(html_text2, NA)
+
+possibly_read(keep_urls[2])
+
+```
+
+
+```{r}
+keep_urls[!grepl(".jpg", keep_urls)]
+```
+
+
+```{r}
+### continued 
+
+url_search_terms
+##########3
+  # search for key terms in urls 
+  keep_urls <- c()
+  for(t in url_search_terms){
+    keep_urls <- c(keep_urls,search_urls[grep(t, search_urls, ignore.case = T)])
+  }
+urls[grep(t, search_urls, ignore.case = T)]
+keep_urls
+
+
+#####
+
+  content_match <- matrix(nrow = length(keep_urls), ncol = 4)
+
+for(p in 1:length(keep_urls)){
+    page_scrape <- read_html(keep_urls[p]) %>% 
+      html_text2() %>% 
+      str_to_lower()
+    # remove punctuation 
+    page_scrape <- gsub("[[:punct:]]", " ", page_scrape)
+    # remove extra spaces 
+    page_scrape <- gsub("  ", " ", page_scrape)
+    # assign match value
+    match_value <- ifelse(sum(str_detect(page_scrape, content_search_terms)),"Keyword Match", NA)
+    # col 1: site
+    content_match[p,1] <- website
+    # col 2: url 
+    content_match[p,2] <- keep_urls[p]
+    # col 3: match value 
+    content_match[p,3] <- match_value
+    # col 4: page text 
+    content_match[p,4] <- page_scrape
+    
+  }
+content_match
+
+df <- content_match %>% as.data.frame()
+    names(df) <- c("sitemap","url","match","page text")
+    df 
+
+```
+
+
+
+
+
+
+
+
+
+
+# sandbox 
+
+```{r}
+### testing 2.0 - how to capture nested sitemaps 
+
+
+sitemap <- "https://www.baptist-health.com/sitemap_index.xml"
+test_s <- read_html(sitemap)
+test_urls <- test_s %>% html_elements("loc") %>% 
+  html_text2()
+test_urls 
+# if the search for "xml" returns nothing, 
+if(identical(test_urls[grep("xml", test_urls, ignore.case = T)], character(0))){
+  # take the raw list of urls
+  keep_urls <- test_urls
+} else {
+  # but if it does return "xml" objects
+  keep_urls <- c()   # empty list 
+  print(test_urls)
+  for(sitemap in test_urls[grep("xml", test_urls, ignore.case = T)]){
+    # read from each sitemap 
+    nested_sitemap_urls <- read_html(sitemap) %>% html_elements("loc") %>% html_text2
+    # add all the links to the urls list
+    keep_urls <- c(keep_urls, nested_sitemap_urls)
+  }
+}
+keep_urls
+
+test_urls
+
+sitemap_2 <- test_urls[1]
+test_s %>% html_elements("loc")
+test_urls
+test_s2 <- read_html(sitemap_2)
+test_s2
+test_urls_2 <- test_s2 %>% html_elements("loc")
+test_urls_2
+```
+
+
+```{r}
+### testing 2.1 - how to capture nested sitemaps  - only search selected sitemaps 
+
+
+
+
+
+sitemap <- "https://www.baptist-health.com/sitemap_index.xml"
+test_s <- read_html(sitemap)
+test_urls <- test_s %>% html_elements("loc") %>% 
+  html_text2()
+test_urls 
+# if the search for "xml" returns nothing, 
+if(identical(test_urls[grep("xml", test_urls, ignore.case = T)], character(0))){
+  # take the raw list of urls
+  keep_urls <- test_urls
+  run_nested_process <<- FALSE
+} else {
+  print("Found nested sitemap: ")
+  print(test_urls)
+  run_nested_process <<- TRUE
+}
+if(run_nested_process){
+  keep_urls <- nested_xml_wrapper()
+}
+
+
+nested_xml <- function(){
+  z <- readline("Which sitemap should we search?")
+  # assign global true/false
+  TF <<- readline("Do you want to search another sitemap?")
+  z
+}
+
+nested_xml_wrapper <- function(){
+  url <- c(nested_xml())
+  if(TF){
+    url <- c(url,nested_xml())
+  }
+  url
+}
+
+```
+"https://www.baptist-health.com/post-sitemap.xml" 
+"https://www.baptist-health.com/page-sitemap.xml"  
+
+
+```{r}
+### testing 
+
+
+site <- "https://www.wakehealth.edu/"
+sitemap <- paste0(site,"sitemap.xml")
+wf <- read_html("https://www.wakehealth.edu/sitemap.xml")
+wf_urls <- wf %>% html_elements("loc") %>% 
+  html_text2()
+wf_urls 
+
+url_search_terms <- c("bone","fracture","fragil","liason")
+keep_urls <- c()
+for(t in url_search_terms){
+  keep_urls <- c(keep_urls,wf_urls[grep(t, wf_urls, ignore.case = T)])
+}
+
+
+content_search_terms <- c("fracture liason", "fragility fracture", "bone fracture services", "skip navigation")
+content_match <- matrix(nrow = length(keep_urls), ncol = 4)
+
+page_scrape_1 <- read_html(keep_urls[1]) %>% 
+  html_text2() %>% 
+  str_to_lower() %>% 
+  # removing punctuation isn't working 
+  str_replace("[:punct:]"," ")
+
+match_value <- ifelse(sum(str_detect(page_scrape_1, content_search_terms)),"Keyword Match", NA)
+# col 1: site 
+content_match[1,1] <- site
+# col 2: url 
+content_match[1,2] <- keep_urls[1]
+# col 3: match value 
+content_match[1,3] <- match_value
+# col 4: page text 
+content_match[1,4] <- page_scrape_1
+
+content_match %>% as.data.frame()
+```
+
+
+
+
+```{r}
+#### function call ####
+
+# test on 10 hospitals 
+
+hospitals <- c("https://www.iowaortho.com/",
+               'https://www.wakehealth.edu/',
+               "http://huhealthcare.com/",
+               "https://www.gwhospital.com/",
+               "https://www.medstargeorgetown.org/",
+               "https://www.massgeneral.org/",
+               "https://www.brighamandwomens.org/",
+               "https://www.nuvancehealth.org/",
+               "https://www.nyp.org/",
+               "https://www.uchicagomedicine.org/"
+)
+url_search_terms <- c("bone","fracture","fragil","liason")
+content_search_terms <- c("fracture liason", "fragility fracture", "bone fracture services","bone density")
+
+# call 1 
+x <- search_site(hospitals[3],url_search_terms, content_search_terms )
+
+
+
+# call all hospitals 
+all_results <- NULL
+for(h in hospitals){
+  tryCatch({search_results <- search_site(h, url_search_terms, content_search_terms);
+  all_results <- rbind(all_results, search_results)},
+ error = function(w){print(paste0("Could not parse:", h))})
+  
+}
+
+all_results %>% filter(!is.na(match))
+rbind(wf, iowa)
+```
+
+```{r}
+### testing (dynamic)
+site <- hospitals[3]
+
+
+sitemap <- paste0(site,"sitemap.xml")
+  html <- read_html(sitemap)
+  urls <- html %>% html_elements("loc") %>% html_text2
+html
+  keep_urls <- c()
+  for(t in url_search_terms){
+    keep_urls <- c(keep_urls,urls[grep(t, urls, ignore.case = T)])
+  }
+  keep_urls <- unique(keep_urls)
+  content_match <- matrix(nrow = length(keep_urls), ncol = 4)
+  
+  for(p in 1:length(keep_urls)){
+    page_scrape <- read_html(keep_urls[p]) %>% 
+      html_text2() %>% 
+      str_to_lower() %>% 
+      # removing punctuation isn't working
+      str_replace("[:punct:]"," ")
+    match_value <- ifelse(sum(str_detect(page_scrape, content_search_terms)),"Keyword Match", NA)
+    # col 1: site
+    content_match[p,1] <- site
+    # col 2: url 
+    content_match[p,2] <- keep_urls[p]
+    # col 3: match value 
+    content_match[p,3] <- match_value
+    # col 4: page text 
+    content_match[p,4] <- page_scrape
+   
+    
+  }
+ df <- content_match %>% as.data.frame()
+names(df) <- c("website","url","match","page text")
+df 
+
+df$`page text`[1]
+```
+
+
+
+```{r}
+#### testing interactive ####
+
+### not using this for now 
+
+# learned from: https://stackoverflow.com/questions/11007178/creating-a-prompt-answer-system-to-input-data-into-r
+# require interaction in the console
+
+standard_list <- c("this","that", "another")
+which_urls <- function(){
+  x <- readline("Should we use the standard list? (TRUE/FALSE)")
+  if(x){
+    usable_list <- standard_list
+  } else {
+    usable_list <- unlist(readline("Please provide the list to use"))
+  }
+  print(usable_list)
+  
+}
+which_urls()
+
+fun <- function(){
+  x <- readline("What is the value of x?")  
+  y <- readline("What is the value of y?")
+  t <- readline("What are the T values?")
+  v <- readline("What are the V values?")
+
+  x <- as.numeric(unlist(strsplit(x, ",")))
+  y <- as.numeric(unlist(strsplit(y, ",")))
+  t <- as.numeric(unlist(strsplit(t, ",")))
+  v <- as.numeric(unlist(strsplit(v, ",")))
+
+  out1 <- x + y
+  out2 <- t + v
+
+  return(list(out1, out2))
+
+}
+
+```
+
+
+
+```{r}
+#### write site search function  VERSION 1 #### 
+
+# function takes a website, attempts to take the website's sitemap URL, 
+# collects all sub-sitemaps, and scrapes text from all URLs 
+# Minor pre-processing is applied to the text 
+# Function then searches for the presences of keywords on the sitemap pages 
+# and returns a dataframe that includes the parent site, the url scraped, an indicator for a keyword match, and the site text 
+
+# search site function 
+search_site <- function(website, 
+                        content_search_terms){
+  sitemap <- paste0(website,"sitemap.xml")
+  html <- read_html(sitemap)
+  urls <- html %>% html_elements("loc") %>% html_text2
+  
+  # are any of these URLs additional sitemaps? 
+  # if the search for "xml" returns nothing, 
+  if(identical(urls[grep("xml", urls, ignore.case = T)], character(0))){
+    # take the raw list of urls
+    keep_urls <- urls
+    run_nested_process <<- FALSE
+  } else {
+    print("Found nested sitemap: ")
+    print(urls)
+    run_nested_process <<- TRUE
+  }
+  if(run_nested_process){
+    keep_urls <- nested_xml_wrapper()
+  }
+  
+  
+  content_match <- matrix(nrow = length(keep_urls), ncol = 4)
+  
+  for(p in 1:length(keep_urls)){
+    
+    page_scrape <- read_html(keep_urls[p]) %>% 
+      html_text2() %>% 
+      str_to_lower() %>% 
+      # removing punctuation isn't working
+      str_replace("[:punct:]"," ")
+    match_value <- ifelse(sum(str_detect(page_scrape, content_search_terms)),"Keyword Match", NA)
+    # col 1: site
+    content_match[p,1] <- website
+    # col 2: url 
+    content_match[p,2] <- keep_urls[p]
+    # col 3: match value 
+    content_match[p,3] <- match_value
+    # col 4: page text 
+    content_match[p,4] <- page_scrape
+    
+  }
+  df <- content_match %>% as.data.frame()
+    names(df) <- c("website","url","match","page text")
+    df 
+                        }
+
+
+
+
+```
+
