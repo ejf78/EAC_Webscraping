@@ -23,6 +23,9 @@ library(tidyverse)
 hospital_urls <- read_csv("Hospital_URLS_1.csv")
 hospital_urls
 
+# ignoring manual failures (couldn't find sitemap on effort) and special sitemaps 
+hosp_url_list <- hospital_urls %>% filter(is.na(manual_fail), is.na(special_sitemap)) %>% .$final_sitemap
+
 # read in search terms, and clean them up 
 search_terms <- read_csv("FLS_search_terms.csv")$SearchTerms %>% tolower() 
 search_terms <- gsub("[[:punct:]]", " ", search_terms) %>% unique()
@@ -47,11 +50,11 @@ url_search_terms <- c("bone","osteo","metabolic","fracture","hip","liason")
 
 
 # list of sitemaps 
-sitemaps_1 <- hospital_urls$sitemap_1
+sitemaps_1 <- hospital_urls$final_sitemap
 site_error_list <- c()
 # which sitemaps exist 
 # half at a time
-for(site in sitemaps_1[1:50]){
+for(site in sitemaps_1[51:length(sitemaps_1)]){
   tryCatch(expr = {read_html(site)
     message()
     },
@@ -71,32 +74,29 @@ for(site in sitemaps_1[1:50]){
 
 ```
 
-errors in 26 through 50 
-ERROR: http://www.ghs.org/sitemap.xml
-
-
-ERROR: http://www.halifax.org/sitemap.xml
-ERROR: http://www.hchdonline.com/sitemap.xml
-ERROR: http://www.methodisthealth.com/sitemap.xml
-
-
-
-
-ERROR: http://www.Jamaicahospital.org/sitemap.xml
-ERROR: http://www.kaleidahealth.org/sitemap.xml
-
-
-
-
-
-ERROR: http://www.lij.edu/sitemap.xml
-ERROR: http://www.navicenthealth.org/sitemap.xml
-ERROR: http://www.mhhs.org/sitemap.xml
-
-ERROR: http://www.mercy.net/sitemap.xml
-ERROR: http://www.mercy.net/sitemap.xml
-ERROR: http://www.methodisthealth.org/sitemap.xml
-
+Errors in 50 through end of list 
+ERROR: http://www.med.umich.edu/sitemap.xml
+ERROR: http://www.montefiore.org/sitemap.xml
+ERROR: http://www.mountcarmelhealth.com/sitemap.xml
+ERROR: http://www.mountsinai.org/sitemap.xml
+ERROR: http://www.northwell.edu/sitemap.xml
+ERROR: http://www.ohiohealth.com/sitemap.xml
+ERROR: http://www.parklandhospital.com/sitemap.xml
+ERROR: http://www.stfrancishospital.com/sitemap.xml
+ERROR: http://www.smh.com/sitemap.xml
+ERROR: http://www.stjosephshealth.org/sitemap.xml
+ERROR: http://www.urmc.rochester.edu/sitemap.xml
+ERROR: http://www.summahealth.org/sitemap.xml
+ERROR: http://www.jefferson.edu/sitemap.xml
+ERROR: http://www.umassmemorial.org/sitemap.xml
+ERROR: http://www.uchealth.org/sitemap.xml
+ERROR: http://www.umc.edu/sitemap.xml
+ERROR: http://www.mdanderson.org/sitemap.xml
+ERROR: http://www.mc.vanderbilt.edu/sitemap.xml
+ERROR: http://www.via-christi.org/sitemap.xml
+ERROR: http://www.vidanthealth.com/sitemap.xml
+ERROR: http://www.wmchealth.org/sitemap.xml
+ERROR: http://www.wkhs.com/sitemap.xml
 
 
 ```{r}
@@ -140,23 +140,20 @@ possibly_parse <- possibly(html_text2, NA)
 
 
 
-
-
-
-
-
-
 ```{r}
 #### version 2 #### 
 
-# keeps all URLS in nexted xml
-# but searches on keyterms 
 
-# function takes a website, attempts to take the website's sitemap URL, 
-# collects all sub-sitemaps, and scrapes text from all URLs 
+
+# function takes a list of sitemaps
+# collects all sub-sitemaps and webpages
+# subsets webpages based on key terms in the webpage URLs to limit computational effort 
+# scrapes text from all relevant URLs
 # Minor pre-processing is applied to the text 
-# Function then searches for the presences of keywords on the sitemap pages 
-# and returns a dataframe that includes the parent site, the url scraped, an indicator for a keyword match, and the site text 
+# Function then searches for the presence of keywords on the sitemap pages 
+# and returns a dataframe that includes the sitemap url, the url scraped, an indicator for a keyword match, and the site text 
+# If a sitemap contains sub-sitemaps, it will loop through sub-sitemaps to grab all URLs
+
 
 # search site function 
 search_site <- function(sitemap, url_search_terms,
@@ -186,21 +183,20 @@ search_site <- function(sitemap, url_search_terms,
   keep_urls <- keep_urls[!grepl(".bmp", keep_urls)]
   keep_urls <- keep_urls[!grepl(".gif", keep_urls)]
   
-  
+  # empty matrix to store result
   content_match <- matrix(nrow = length(keep_urls), ncol = 4)
-
-  
+  # loop through all urls 
   for(p in 1:length(keep_urls)){
+    # robust to errors, parse the webpages 
     page_scrape <- possibly_read(keep_urls[p])
     page_scrape <- possibly_parse(page_scrape) %>% str_to_lower()
-    
     # remove punctuation 
     page_scrape <- gsub("[[:punct:]]", " ", page_scrape)
     # remove extra spaces 
     page_scrape <- gsub("  ", " ", page_scrape)
     # assign match value
     match_value <- ifelse(sum(str_detect(page_scrape, content_search_terms)),"Keyword Match", NA)
-    # col 1: site
+    # col 1: sitemap
     content_match[p,1] <- sitemap
     # col 2: url 
     content_match[p,2] <- keep_urls[p]
@@ -217,37 +213,6 @@ search_site <- function(sitemap, url_search_terms,
 
 ```
 
-
-
-
-```{r}
-#### try it out #### 
-
-# get list of hospitals 
-hosp_url_list <- hospital_urls %>% filter(is.na(manual_fail), is.na(special_sitemap)) %>% .$final_sitemap
-# first batch 
-hosp_url_list[1:15]
-
-
-# read in search terms, and clean them up 
-search_terms <- read_csv("FLS_search_terms.csv")$SearchTerms %>% tolower() 
-search_terms <- gsub("[[:punct:]]", " ", search_terms) %>% unique()
-
-# define URL search terms 
-url_search_terms <- c("bone","osteo","metabolic","fracture","liason")
-
-
-# run function on one 
-hosp1 <- search_site(hosp_url_list[1],url_search_terms, search_terms)
-
-```
-
-
-```{r}
-# run another one 
-hosp2 <- search_site(hosp_url_list[4], url_search_terms, search_terms)
-hosp2
-```
 
 
 ```{r}
@@ -270,6 +235,10 @@ for(h in hosp_url_list[1:10]){
 errored_sitemaps
 results_batch1$sitemap %>% unique()
 results_batch1 %>% filter(!is.na(match))
+
+# write data 
+saveRDS(results_batch1, file = "batch1.rds")
+
 ```
 
 
@@ -289,6 +258,65 @@ for(h in hosp_url_list[11:20]){
 }
 
 results_batch2 %>% filter(!is.na(match))
+# write data
+saveRDS(results_batch2, file = "batch2.rds")
+
+```
+
+
+
+```{r}
+#### batch 3 ####
+
+results_batch3 <- data.frame()
+
+for(h in hosp_url_list[21:30]){
+  result <- try(search_site(h, url_search_terms, search_terms), silent = TRUE)
+  if(str_detect(result, "Error")){
+    errored_sitemaps <- c(errored_sitemaps, h)
+  } else {
+    results_batch3 <- rbind(results_batch3, result)
+  }
+  print(paste0("Done with ",h))
+}
+
+errored_sitemaps
+
+results_batch3 %>% filter(!is.na(match))
+
+# write data
+saveRDS(results_batch3, file = "batch3.rds")
+saveRDS(errored_sitemaps, file = "errored_sitemaps.rds")
+errored_sitemaps
+
+
+```
+
+
+STOPPED HERE []
+
+
+
+
+
+```{r}
+#### batch 4 ####
+
+results_batch4 <- data.frame()
+
+for(h in hosp_url_list[31:40]){
+  result <- try(search_site(h, url_search_terms, search_terms), silent = TRUE)
+  if(str_detect(result, "Error")){
+    errored_sitemaps <- c(errored_sitemaps, h)
+  } else {
+    results_batch2 <- rbind(results_batch2, result)
+  }
+  print(paste0("Done with ",h))
+}
+
+errored_sitemaps
+
+results_batch4 %>% filter(!is.na(match))
 
 ```
 
@@ -303,7 +331,7 @@ For final product:
   - then match back to the input dataframe to get hospital names 
 - list of errored sites (match back to hospital / url)
 
-total hours so far: 6 
+total hours so far: 7
 
 
 
@@ -772,4 +800,37 @@ search_site <- function(website,
 
 
 ```
+
+
+
+
+```{r}
+#### try it out #### 
+
+# get list of hospitals 
+hosp_url_list <- hospital_urls %>% filter(is.na(manual_fail), is.na(special_sitemap)) %>% .$final_sitemap
+# first batch 
+hosp_url_list[1:15]
+
+
+# read in search terms, and clean them up 
+search_terms <- read_csv("FLS_search_terms.csv")$SearchTerms %>% tolower() 
+search_terms <- gsub("[[:punct:]]", " ", search_terms) %>% unique()
+
+# define URL search terms 
+url_search_terms <- c("bone","osteo","metabolic","fracture","liason")
+
+
+# run function on one 
+hosp1 <- search_site(hosp_url_list[1],url_search_terms, search_terms)
+
+```
+
+
+```{r}
+# run another one 
+hosp2 <- search_site(hosp_url_list[4], url_search_terms, search_terms)
+hosp2
+```
+
 
