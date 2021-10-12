@@ -299,7 +299,7 @@ STOPPED HERE []
 
 
 
-```{r}
+```{r warning = F}
 #### batch 4 ####
 
 results_batch4 <- data.frame()
@@ -309,7 +309,7 @@ for(h in hosp_url_list[31:40]){
   if(str_detect(result, "Error")){
     errored_sitemaps <- c(errored_sitemaps, h)
   } else {
-    results_batch2 <- rbind(results_batch2, result)
+    results_batch4 <- rbind(results_batch4, result)
   }
   print(paste0("Done with ",h))
 }
@@ -317,6 +317,9 @@ for(h in hosp_url_list[31:40]){
 errored_sitemaps
 
 results_batch4 %>% filter(!is.na(match))
+# write data
+saveRDS(results_batch4, file = "batch4.rds")
+saveRDS(errored_sitemaps, file = "errored_sitemaps.rds")
 
 ```
 
