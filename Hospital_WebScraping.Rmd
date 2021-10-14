@@ -302,6 +302,9 @@ STOPPED HERE []
 ```{r warning = F}
 #### batch 4 ####
 
+# (temp)
+#errored_sitemaps <- readRDS("errored_sitemaps.rds")
+
 results_batch4 <- data.frame()
 
 for(h in hosp_url_list[31:40]){
@@ -341,6 +344,57 @@ total hours so far: 7
 
 
 
+```{r warning = F}
+#### batch 5 ####
+
+# (temp)
+errored_sitemaps <- readRDS("errored_sitemaps.rds")
+
+results_batch5 <- data.frame()
+
+for(h in hosp_url_list[41:50]){
+  result <- try(search_site(h, url_search_terms, search_terms), silent = TRUE)
+  if(str_detect(result, "Error")){
+    errored_sitemaps <- c(errored_sitemaps, h)
+  } else {
+    results_batch5 <- rbind(results_batch5, result)
+  }
+  print(paste0("Done with ",h))
+}
+
+errored_sitemaps
+
+results_batch5 %>% filter(!is.na(match))
+
+# write data
+saveRDS(results_batch5, file = "batch5.rds")
+saveRDS(errored_sitemaps, file = "errored_sitemaps.rds")
+
+
+```
+
+
+
+```{r}
+#### run the rest ####
+
+# empty dataframe
+all_other_results<- data.frame()
+
+for(h in hosp_url_list[51:length(hosp_url_list)]){
+  result <- try(search_site(h, url_search_terms, search_terms), silent = TRUE)
+  if(str_detect(result, "Error")){
+    errored_sitemaps <- c(errored_sitemaps, h)
+  } else {
+    all_other_results <- rbind(all_other_results, result)
+  }
+  print(paste0("Done with ",h))
+}
+# write data
+saveRDS(all_other_results, file = "all_other.rds")
+saveRDS(errored_sitemaps, file = "errored_sitemaps.rds")
+errored_sitemaps
+```
 
 
 
@@ -348,9 +402,11 @@ total hours so far: 7
 
 
 
+```{r}
+#### bind results & export ####
 
 
-
+```
 
 
 
